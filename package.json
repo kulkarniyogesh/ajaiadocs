@@ -24,6 +24,7 @@
     "@tiptap/react": "^2.0.0",
     "@tiptap/starter-kit": "^2.0.0",
     "@types/pg": "^8.23.1",
+    "@types/ws": "^8.18.2",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.0.0",
@@ -41,7 +42,8 @@
     "remark-rehype": "^11.0.0",
     "remark-stringify": "^11.0.0",
     "serverless-http": "^4.0.0",
-    "unified": "^11.0.0"
+    "unified": "^11.0.0",
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.0",

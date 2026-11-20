@@ -2,6 +2,12 @@
 // Uses Supabase JS client (HTTP/HTTPS only — no direct TCP to Postgres)
 // All DB access goes through PostgREST + Supabase Auth Admin APIs
 
+// Polyfill WebSocket for Node < 22 — suppresses Supabase realtime warning
+import { WebSocket } from 'ws';
+if (!globalThis.WebSocket) {
+  (globalThis as any).WebSocket = WebSocket;
+}
+
 import express from 'express';
 import cors from 'cors';
 import serverless from 'serverless-http';
@@ -20,7 +26,10 @@ function sb(): SupabaseClient {
     _sb = createClient(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      { auth: { persistSession: false } }
+      {
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+        realtime: { timeout: 0 } as any,
+      }
     );
   }
   return _sb;
