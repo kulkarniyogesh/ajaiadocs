@@ -144,7 +144,7 @@ function sb(): SupabaseClient {
 }
 
 function jwtSecret(): string { return process.env.JWT_SECRET ?? 'dev-secret'; }
-const BUCKET = process.env.STORAGE_BUCKET ?? 'docs';
+const BUCKET = process.env.STORAGE_BUCKET ?? 'ajaia-docs';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // DB helpers (PostgREST via Supabase JS)
