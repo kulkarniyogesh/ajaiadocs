@@ -1,5 +1,5 @@
 import pg from 'pg';
-import 'dotenv/config';
+// dotenv loaded by entry point (server/index.ts for local, not needed on Netlify)
 
 const { Pool } = pg;
 

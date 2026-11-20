@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import serverless from 'serverless-http';
@@ -15,7 +14,6 @@ app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 
-// Routes — paths match what the client sends (/api/auth, /api/documents, etc.)
 app.use('/api/auth', authRouter);
 app.use('/api/documents', documentsRouter);
 app.use('/api/documents', sharingRouter);
@@ -23,13 +21,11 @@ app.use('/api/import', importRouter);
 
 app.use(errorMiddleware);
 
-// Migration runs once per cold start (DDL is idempotent)
 let migrated = false;
 
-const serverlessHandler = serverless(app, {
-  // Strip the /.netlify/functions/api prefix so Express sees /api/...
-  basePath: '/.netlify/functions/api',
-});
+// No basePath — Netlify passes the full original URL path to the function
+// so Express sees /api/auth/login exactly as the client sent it
+const serverlessHandler = serverless(app);
 
 export const handler = async (
   event: Parameters<typeof serverlessHandler>[0],
