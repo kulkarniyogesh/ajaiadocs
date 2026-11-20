@@ -345,7 +345,6 @@ export function GlobalNav({
               fontWeight: 600,
             }}>
               <span className="material-symbols-outlined" style={{ fontSize: 16 }}>group</span>
-              <span>38 Members active</span>
             </div>
           </div>
         </div>
