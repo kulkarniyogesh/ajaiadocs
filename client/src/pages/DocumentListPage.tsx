@@ -654,7 +654,9 @@ export default function DocumentListPage({
                 </div>
 
                 {loading ? (
-                  <div style={{ padding: 'var(--space-md)' }}><SkeletonLoader count={4} /></div>
+                  <div style={{ padding: 'var(--space-md)' }}>
+                    <SkeletonLoader count={5} variant={viewMode} />
+                  </div>
                 ) : filteredDocs.length === 0 ? (
                   <div style={{ padding: 'var(--space-xl)', textAlign: 'center', color: 'var(--color-on-surface-variant)' }}>
                     <p style={{ fontSize: 'var(--text-lg)', fontWeight: 600, margin: '0 0 8px', color: 'var(--color-on-surface)' }}>No documents found</p>
@@ -687,7 +689,7 @@ export default function DocumentListPage({
             ) : (
               /* GRID VIEW */
               loading ? (
-                <div style={{ padding: 'var(--space-md)' }}><SkeletonLoader count={4} /></div>
+                <div style={{ padding: 'var(--space-md)' }}><SkeletonLoader count={6} variant="grid" /></div>
               ) : filteredDocs.length === 0 ? (
                 <div style={{ padding: 'var(--space-xl)', textAlign: 'center', color: 'var(--color-on-surface-variant)' }}>
                   <p style={{ fontSize: 'var(--text-lg)', fontWeight: 600, margin: '0 0 8px', color: 'var(--color-on-surface)' }}>No documents found</p>

@@ -90,7 +90,7 @@ export default function RecentPage({ onSelectDocument, userEmail, onLogout, onTa
 
           {/* Document list */}
           {loading ? (
-            <div style={{ padding: 'var(--space-md)' }}><SkeletonLoader count={8} /></div>
+            <div style={{ padding: 'var(--space-md)' }}><SkeletonLoader count={8} variant={viewMode} /></div>
           ) : recentDocs.length === 0 ? (
             <div style={{ padding: 'var(--space-xl)', textAlign: 'center', background: 'var(--color-surface-container-lowest)', borderRadius: 12, boxShadow: 'var(--shadow-sm)' }}>
               <span className="material-symbols-outlined" style={{ fontSize: 48, color: 'var(--color-on-surface-variant)', display: 'block', marginBottom: 12 }}>history</span>

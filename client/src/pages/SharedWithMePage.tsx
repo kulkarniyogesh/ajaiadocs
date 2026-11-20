@@ -145,7 +145,7 @@ function DocList({ docs, loading, viewMode, setViewMode, onSelect, onDelete, onS
   emptyTitle: string;
   emptyDesc: string;
 }) {
-  if (loading) return <div style={{ padding: 'var(--space-md)' }}><SkeletonLoader count={5} /></div>;
+  if (loading) return <div style={{ padding: 'var(--space-md)' }}><SkeletonLoader count={5} variant={viewMode} /></div>;
 
   if (docs.length === 0) return (
     <div style={{ padding: 'var(--space-xl)', textAlign: 'center', background: 'var(--color-surface-container-lowest)', borderRadius: 12, boxShadow: 'var(--shadow-sm)' }}>
