@@ -4,6 +4,7 @@ import { GlobalNav } from '../components/GlobalNav';
 import DocumentListItem from '../components/DocumentListItem';
 import SkeletonLoader from '../components/SkeletonLoader';
 import ImportModal from '../components/ImportModal';
+import ShareDialog from '../components/ShareDialog';
 import { useDocumentList } from '../hooks/useDocumentList';
 
 interface DocumentListPageProps {
@@ -174,6 +175,7 @@ export default function DocumentListPage({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [recentUploads, setRecentUploads] = useState<{ name: string; size: string }[]>([]);
+  const [shareDocId, setShareDocId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [ownedOnlyPill, setOwnedOnlyPill] = useState(false); // "Owned by me" pill within all-docs tab
   const [tagFilter, setTagFilter] = useState<TagFilter>('all');
@@ -525,22 +527,42 @@ export default function DocumentListPage({
                   />
                 </div>
 
-                {/* List/Grid toggle */}
-                <div style={{ display: 'flex', alignItems: 'center', padding: 2, borderRadius: 8, background: 'var(--color-surface-container)', flexShrink: 0 }}>
-                  {(['list', 'grid'] as ViewMode[]).map(mode => {
+                {/* List / Grid view toggle — prominent segmented control */}
+                <div style={{
+                  display: 'flex', alignItems: 'center',
+                  padding: 3, borderRadius: 10,
+                  background: 'var(--color-surface-container)',
+                  border: '1px solid var(--color-outline-variant)',
+                  flexShrink: 0,
+                  gap: 2,
+                }}>
+                  {([
+                    { mode: 'list', icon: 'format_list_bulleted', label: 'List' },
+                    { mode: 'grid', icon: 'grid_view', label: 'Grid' },
+                  ] as { mode: ViewMode; icon: string; label: string }[]).map(({ mode, icon, label }) => {
                     const isActive = viewMode === mode;
                     return (
-                      <button key={mode} onClick={() => setViewMode(mode)} title={mode === 'list' ? 'List View' : 'Grid View'} style={{
-                        width: 32, height: 32, border: 'none', borderRadius: 6,
-                        background: isActive ? 'var(--color-surface-container-lowest)' : 'transparent',
-                        color: isActive ? 'var(--color-primary)' : 'var(--color-on-surface-variant)',
-                        boxShadow: isActive ? 'var(--shadow-sm)' : 'none',
-                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        transition: 'all 100ms', fontFamily: 'inherit',
-                      }}>
-                        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-                          {mode === 'list' ? 'format_list_bulleted' : 'grid_view'}
-                        </span>
+                      <button
+                        key={mode}
+                        onClick={() => setViewMode(mode)}
+                        title={`${label} view`}
+                        style={{
+                          height: 30, padding: '0 10px',
+                          border: 'none', borderRadius: 7,
+                          background: isActive ? 'var(--color-primary)' : 'transparent',
+                          color: isActive ? 'var(--color-on-primary)' : 'var(--color-on-surface-variant)',
+                          boxShadow: isActive ? 'var(--shadow-sm)' : 'none',
+                          cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', gap: 5,
+                          fontSize: 'var(--text-xs)', fontWeight: isActive ? 600 : 500,
+                          transition: 'all 120ms', fontFamily: 'inherit',
+                          whiteSpace: 'nowrap',
+                        }}
+                        onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--color-surface-container-high)'; }}
+                        onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: 16 }}>{icon}</span>
+                        {label}
                       </button>
                     );
                   })}
@@ -586,13 +608,14 @@ export default function DocumentListPage({
 
             {viewMode === 'list' ? (
               /* LIST VIEW */
-              <div style={{ background: 'var(--color-surface-container-lowest)', borderRadius: 12, boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
-                {/* Table header */}
+              <div style={{ background: 'var(--color-surface-container-lowest)', borderRadius: 12, boxShadow: 'var(--shadow-sm)', overflow: 'visible' }}>
+                {/* List header with inline view toggle */}
                 <div style={{
                   display: 'grid', gridTemplateColumns: '5fr 2fr 2fr 2fr 1fr',
                   gap: 'var(--space-sm)', padding: 'var(--space-sm) var(--space-md)',
                   background: 'var(--color-surface-container-low)',
                   borderBottom: '1px solid var(--color-outline-variant)',
+                  borderRadius: '12px 12px 0 0',
                   color: 'var(--color-on-surface-variant)',
                   fontSize: 'var(--text-xs)', fontWeight: 600,
                   letterSpacing: '0.08em', textTransform: 'uppercase', userSelect: 'none',
@@ -602,9 +625,27 @@ export default function DocumentListPage({
                     <span className="material-symbols-outlined" style={{ fontSize: 14 }}>arrow_downward</span>
                   </div>
                   <div>Owner</div>
-                  <div>Storage / Last sync</div>
+                  <div>Last sync</div>
                   <div>Collaborators</div>
-                  <div style={{ textAlign: 'right' }}>Actions</div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+                    {/* Inline mini view toggle */}
+                    <div style={{ display: 'flex', padding: 2, borderRadius: 6, background: 'var(--color-surface-container)', gap: 1 }}>
+                      {([
+                        { mode: 'list' as ViewMode, icon: 'format_list_bulleted' },
+                        { mode: 'grid' as ViewMode, icon: 'grid_view' },
+                      ]).map(({ mode, icon }) => (
+                        <button key={mode} onClick={() => setViewMode(mode)} title={`${mode} view`} style={{
+                          width: 22, height: 22, border: 'none', borderRadius: 4,
+                          background: viewMode === mode ? 'var(--color-primary)' : 'transparent',
+                          color: viewMode === mode ? 'var(--color-on-primary)' : 'var(--color-on-surface-variant)',
+                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontFamily: 'inherit', transition: 'all 100ms',
+                        }}>
+                          <span className="material-symbols-outlined" style={{ fontSize: 14 }}>{icon}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
                 {loading ? (
@@ -630,6 +671,7 @@ export default function DocumentListPage({
                           viewMode="list"
                           onClick={() => onSelectDocument(doc.id)}
                           onDelete={doc.isOwner ? () => handleDelete(doc.id) : undefined}
+                          onShare={() => setShareDocId(doc.id)}
                         />
                       </li>
                     ))}
@@ -646,20 +688,51 @@ export default function DocumentListPage({
                   <p style={{ margin: 0, fontSize: 'var(--text-sm)' }}>Try adjusting the filters or search query.</p>
                 </div>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 'var(--space-md)' }}>
-                  {filteredDocs.map(doc => (
-                    <DocumentListItem
-                      key={doc.id}
-                      id={doc.id}
-                      title={doc.title}
-                      updatedAt={doc.updatedAt}
-                      isOwner={doc.isOwner}
-                      viewMode="grid"
-                      onClick={() => onSelectDocument(doc.id)}
-                      onDelete={doc.isOwner ? () => handleDelete(doc.id) : undefined}
-                    />
-                  ))}
-                </div>
+                <>
+                  {/* Grid header with view toggle */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    marginBottom: 'var(--space-sm)',
+                    padding: '6px 2px',
+                  }}>
+                    <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-on-surface-variant)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                      {filteredDocs.length} document{filteredDocs.length !== 1 ? 's' : ''}
+                    </span>
+                    <div style={{ display: 'flex', padding: 2, borderRadius: 8, background: 'var(--color-surface-container)', border: '1px solid var(--color-outline-variant)', gap: 2 }}>
+                      {([
+                        { mode: 'list' as ViewMode, icon: 'format_list_bulleted', label: 'List' },
+                        { mode: 'grid' as ViewMode, icon: 'grid_view', label: 'Grid' },
+                      ]).map(({ mode, icon, label }) => (
+                        <button key={mode} onClick={() => setViewMode(mode)} title={`${label} view`} style={{
+                          height: 28, padding: '0 10px', border: 'none', borderRadius: 6,
+                          background: viewMode === mode ? 'var(--color-primary)' : 'transparent',
+                          color: viewMode === mode ? 'var(--color-on-primary)' : 'var(--color-on-surface-variant)',
+                          cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+                          fontSize: 'var(--text-xs)', fontWeight: viewMode === mode ? 600 : 500,
+                          fontFamily: 'inherit', transition: 'all 100ms',
+                        }}>
+                          <span className="material-symbols-outlined" style={{ fontSize: 15 }}>{icon}</span>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 'var(--space-md)' }}>
+                    {filteredDocs.map(doc => (
+                      <DocumentListItem
+                        key={doc.id}
+                        id={doc.id}
+                        title={doc.title}
+                        updatedAt={doc.updatedAt}
+                        isOwner={doc.isOwner}
+                        viewMode="grid"
+                        onClick={() => onSelectDocument(doc.id)}
+                        onDelete={doc.isOwner ? () => handleDelete(doc.id) : undefined}
+                        onShare={() => setShareDocId(doc.id)}
+                      />
+                    ))}
+                  </div>
+                </>
               )
             )}
           </div>
@@ -741,6 +814,14 @@ export default function DocumentListPage({
         </footer>
 
       </div>
+      {/* Share dialog */}
+      {shareDocId !== null && (
+        <ShareDialog
+          documentId={shareDocId}
+          isOpen={true}
+          onClose={() => setShareDocId(null)}
+        />
+      )}
     </AppShell>
   );
 }

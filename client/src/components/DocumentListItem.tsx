@@ -9,6 +9,7 @@ interface DocumentListItemProps {
   onClick: () => void;
   onDelete?: () => void;
   onShare?: () => void;
+  onExport?: () => void;
   viewMode?: 'list' | 'grid';
 }
 
@@ -39,24 +40,98 @@ const FAKE_COLLABORATORS = [
   { initials: 'AR', color: '#684000' },
 ];
 
-// ── Portal-based context menu ─────────────────────────────────────────────────
+// ── Export helper ─────────────────────────────────────────────────────────────
+
+function tiptapToMarkdown(node: any, depth = 0): string {
+  if (!node) return '';
+  switch (node.type) {
+    case 'doc': return (node.content ?? []).map((n: any) => tiptapToMarkdown(n)).join('\n\n').trim();
+    case 'heading': {
+      const hashes = '#'.repeat(node.attrs?.level ?? 1);
+      const text = (node.content ?? []).map((n: any) => tiptapToMarkdown(n)).join('');
+      return `${hashes} ${text}`;
+    }
+    case 'paragraph': {
+      const text = (node.content ?? []).map((n: any) => tiptapToMarkdown(n)).join('');
+      return text || '';
+    }
+    case 'bulletList': return (node.content ?? []).map((n: any) => tiptapToMarkdown(n, depth)).join('\n');
+    case 'orderedList': return (node.content ?? []).map((n: any) => tiptapToMarkdown(n, depth)).join('\n');
+    case 'listItem': {
+      const prefix = depth > 0 ? '  '.repeat(depth) : '';
+      const text = (node.content ?? []).map((n: any) => tiptapToMarkdown(n, depth + 1)).join(' ').trim();
+      return `${prefix}- ${text}`;
+    }
+    case 'blockquote': return (node.content ?? []).map((n: any) => `> ${tiptapToMarkdown(n)}`).join('\n');
+    case 'codeBlock': {
+      const lang = node.attrs?.language ?? '';
+      const code = (node.content ?? []).map((n: any) => n.text ?? '').join('');
+      return `\`\`\`${lang}\n${code}\n\`\`\``;
+    }
+    case 'horizontalRule': return '---';
+    case 'hardBreak': return '  \n';
+    case 'text': {
+      let text = node.text ?? '';
+      const marks: string[] = (node.marks ?? []).map((m: any) => m.type);
+      if (marks.includes('bold')) text = `**${text}**`;
+      if (marks.includes('italic')) text = `_${text}_`;
+      if (marks.includes('code')) text = `\`${text}\``;
+      return text;
+    }
+    default: return (node.content ?? []).map((n: any) => tiptapToMarkdown(n)).join('');
+  }
+}
+
+async function exportDocAsMarkdown(id: number, title: string) {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`/api/documents/${id}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error('Failed to fetch document');
+  const doc = await res.json();
+  let md = '';
+  try {
+    const parsed = typeof doc.content === 'string' ? JSON.parse(doc.content) : doc.content;
+    md = tiptapToMarkdown(parsed);
+  } catch {
+    md = doc.content ?? '';
+  }
+  const blob = new Blob([md], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 interface MenuPos { top: number; right: number }
 
 interface ContextMenuProps {
   pos: MenuPos;
   isOwner: boolean;
+  docId: number;
+  docTitle: string;
   onClose: () => void;
   onDelete?: () => void;
+  onShare?: () => void;
 }
 
-function ContextMenu({ pos, isOwner, onClose, onDelete }: ContextMenuProps) {
+function ContextMenu({ pos, isOwner, docId, docTitle, onClose, onDelete, onShare }: ContextMenuProps) {
+  const [exporting, setExporting] = React.useState(false);
+
+  async function handleExport() {
+    setExporting(true);
+    try { await exportDocAsMarkdown(docId, docTitle); }
+    catch (e) { alert('Export failed: ' + (e as Error).message); }
+    setExporting(false);
+    onClose();
+  }
+
   const items = [
-    { icon: 'drive_file_rename_outline', label: 'Rename Document', action: onClose },
-    { icon: 'person_add', label: 'Manage Permissions', action: onClose },
-    { icon: 'content_copy', label: 'Duplicate Document', action: onClose },
+    { icon: 'share', label: 'Share / Manage Access', action: () => { onClose(); onShare?.(); } },
     null,
-    { icon: 'download', label: 'Export as Markdown', action: onClose },
+    { icon: 'download', label: exporting ? 'Exporting…' : 'Export as Markdown', action: handleExport },
     null,
     ...(isOwner && onDelete
       ? [{ icon: 'delete', label: 'Move to Trash', action: () => { onClose(); onDelete(); }, danger: true }]
@@ -123,6 +198,7 @@ function ContextMenu({ pos, isOwner, onClose, onDelete }: ContextMenuProps) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function DocumentListItem({
+  id,
   title,
   updatedAt,
   isOwner,
@@ -221,8 +297,11 @@ export function DocumentListItem({
           <ContextMenu
             pos={menuPos}
             isOwner={isOwner}
+            docId={id}
+            docTitle={title}
             onClose={() => setMenuPos(null)}
             onDelete={onDelete}
+            onShare={onShare}
           />
         )}
       </>
@@ -368,8 +447,11 @@ export function DocumentListItem({
         <ContextMenu
           pos={menuPos}
           isOwner={isOwner}
+          docId={id}
+          docTitle={title}
           onClose={() => setMenuPos(null)}
           onDelete={onDelete}
+          onShare={onShare}
         />
       )}
     </>
