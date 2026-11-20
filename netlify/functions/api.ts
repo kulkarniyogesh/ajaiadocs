@@ -1,12 +1,10 @@
-// Netlify serverless function
-// Uses Supabase JS client (HTTP/HTTPS only — no direct TCP to Postgres)
-// All DB access goes through PostgREST + Supabase Auth Admin APIs
+// Netlify serverless function — single self-contained file
+// DB: Supabase PostgREST (HTTP) — no direct TCP/5432
+// File parsing: mammoth (.docx), remark (.md), plain text (.txt)
 
-// Polyfill WebSocket for Node < 22 — suppresses Supabase realtime warning
+// Polyfill WebSocket for Node < 22
 import { WebSocket } from 'ws';
-if (!globalThis.WebSocket) {
-  (globalThis as any).WebSocket = WebSocket;
-}
+if (!globalThis.WebSocket) (globalThis as any).WebSocket = WebSocket;
 
 import express from 'express';
 import cors from 'cors';
@@ -16,9 +14,122 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import path from 'node:path';
+import mammoth from 'mammoth';
+import { unified } from 'unified';
+import remarkParse from 'remark-parse';
+import rehypeParse from 'rehype-parse';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { Root, Node as MdNode, Heading, Paragraph, Strong, Emphasis, Text as MdText, InlineCode, Code, List, ListItem, Blockquote } from 'mdast';
+import type { Element, Text as HastText, Root as HastRoot, Node as HastNode } from 'hast';
 
-// ── Lazy Supabase client (HTTP only, no TCP) ──────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// TipTap types
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface TiptapNode {
+  type: string;
+  attrs?: Record<string, unknown>;
+  marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
+  content?: TiptapNode[];
+  text?: string;
+}
+interface TiptapJSON { type: 'doc'; content: TiptapNode[] }
+type Mark = { type: string; attrs?: Record<string, unknown> };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Markdown → TipTap (remark-based, full fidelity)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function parseMdToTiptap(source: string): TiptapJSON {
+  const tree = unified().use(remarkParse).parse(source) as Root;
+  return { type: 'doc', content: (tree.children as MdNode[]).map(convertMdBlock) };
+}
+
+function convertMdBlock(node: MdNode): TiptapNode {
+  switch (node.type) {
+    case 'heading': { const h = node as Heading; return { type: 'heading', attrs: { level: h.depth }, content: convertMdInlines(h.children as MdNode[]) }; }
+    case 'paragraph': { const p = node as Paragraph; return { type: 'paragraph', content: convertMdInlines(p.children as MdNode[]) }; }
+    case 'code': { const c = node as Code; return { type: 'codeBlock', attrs: { language: c.lang ?? null }, content: [{ type: 'text', text: c.value }] }; }
+    case 'list': { const l = node as List; return { type: l.ordered ? 'orderedList' : 'bulletList', content: (l.children as MdNode[]).map(convertMdBlock) }; }
+    case 'listItem': { const li = node as ListItem; return { type: 'listItem', content: (li.children as MdNode[]).map(convertMdBlock) }; }
+    case 'blockquote': { const bq = node as Blockquote; return { type: 'blockquote', content: (bq.children as MdNode[]).map(convertMdBlock) }; }
+    case 'thematicBreak': return { type: 'horizontalRule' };
+    default: return { type: 'paragraph', content: [{ type: 'text', text: extractMdText(node) }] };
+  }
+}
+
+function convertMdInlines(nodes: MdNode[]): TiptapNode[] { return nodes.flatMap(n => convertMdInline(n, [])); }
+
+function convertMdInline(node: MdNode, marks: Mark[]): TiptapNode[] {
+  switch (node.type) {
+    case 'text': { const r: TiptapNode = { type: 'text', text: (node as MdText).value }; if (marks.length) r.marks = marks; return [r]; }
+    case 'inlineCode': return [{ type: 'text', text: (node as InlineCode).value, marks: [...marks, { type: 'code' }] }];
+    case 'strong': return ((node as Strong).children as MdNode[]).flatMap(c => convertMdInline(c, [...marks, { type: 'bold' }]));
+    case 'emphasis': return ((node as Emphasis).children as MdNode[]).flatMap(c => convertMdInline(c, [...marks, { type: 'italic' }]));
+    default: return [{ type: 'text', text: extractMdText(node) }];
+  }
+}
+
+function extractMdText(node: MdNode): string {
+  if ('value' in node && typeof (node as any).value === 'string') return (node as any).value;
+  if ('children' in node) return ((node as any).children ?? []).map(extractMdText).join('');
+  return '';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HTML (mammoth output) → TipTap
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function htmlToTiptap(html: string): TiptapJSON {
+  const hast = unified().use(rehypeParse, { fragment: true }).parse(html) as HastRoot;
+  const blocks = hast.children.flatMap(n => convertHastNode(n as HastNode, []));
+  return { type: 'doc', content: blocks.length ? blocks : [{ type: 'paragraph' }] };
+}
+
+function convertHastNode(node: HastNode, marks: Mark[]): TiptapNode[] {
+  if (node.type === 'text') {
+    const v = (node as HastText).value;
+    if (!v.trim() && !marks.length) return [];
+    if (!v) return [];
+    const n: TiptapNode = { type: 'text', text: v };
+    if (marks.length) n.marks = [...marks];
+    return [n];
+  }
+  if (node.type !== 'element') return [];
+  const el = node as Element;
+  const tag = el.tagName.toLowerCase();
+  const kids = () => el.children.flatMap(c => convertHastNode(c as HastNode, marks));
+
+  if (/^h[1-6]$/.test(tag)) return [{ type: 'heading', attrs: { level: parseInt(tag[1], 10) }, content: kids() }];
+  if (tag === 'p') { const c = kids(); return [{ type: 'paragraph', content: c.length ? c : undefined }]; }
+  if (tag === 'ul') return [{ type: 'bulletList', content: kids() }];
+  if (tag === 'ol') return [{ type: 'orderedList', content: kids() }];
+  if (tag === 'li') { const c = kids(); return [{ type: 'listItem', content: c.every(isInline) ? [{ type: 'paragraph', content: c }] : c }]; }
+  if (tag === 'blockquote') return [{ type: 'blockquote', content: kids() }];
+  if (tag === 'pre') return [{ type: 'codeBlock', attrs: { language: null }, content: [{ type: 'text', text: extractHastText(el) }] }];
+  if (tag === 'hr') return [{ type: 'horizontalRule' }];
+  if (tag === 'br') return [{ type: 'hardBreak' }];
+  if (tag === 'strong' || tag === 'b') return el.children.flatMap(c => convertHastNode(c as HastNode, [...marks, { type: 'bold' }]));
+  if (tag === 'em' || tag === 'i') return el.children.flatMap(c => convertHastNode(c as HastNode, [...marks, { type: 'italic' }]));
+  if (tag === 'u') return el.children.flatMap(c => convertHastNode(c as HastNode, [...marks, { type: 'underline' }]));
+  if (tag === 'code') return el.children.flatMap(c => convertHastNode(c as HastNode, [...marks, { type: 'code' }]));
+  if (['table', 'img', 'figure', 'script', 'style', 'svg'].includes(tag)) return [];
+  const children = kids();
+  if (children.length && children.every(isInline)) return [{ type: 'paragraph', content: children }];
+  return children;
+}
+
+function extractHastText(node: HastNode): string {
+  if (node.type === 'text') return (node as HastText).value;
+  if (node.type === 'element') return (node as Element).children.map(extractHastText).join('');
+  return '';
+}
+
+function isInline(n: TiptapNode): boolean { return ['text', 'hardBreak'].includes(n.type); }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Lazy Supabase client
+// ═══════════════════════════════════════════════════════════════════════════════
 
 let _sb: SupabaseClient | null = null;
 function sb(): SupabaseClient {
@@ -26,20 +137,18 @@ function sb(): SupabaseClient {
     _sb = createClient(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-        realtime: { timeout: 0 } as any,
-      }
+      { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }
     );
   }
   return _sb;
 }
 
-function jwtSecret(): string {
-  return process.env.JWT_SECRET ?? 'dev-secret';
-}
+function jwtSecret(): string { return process.env.JWT_SECRET ?? 'dev-secret'; }
+const BUCKET = process.env.STORAGE_BUCKET ?? 'docs';
 
-// ── Generic DB helpers via PostgREST ──────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// DB helpers (PostgREST via Supabase JS)
+// ═══════════════════════════════════════════════════════════════════════════════
 
 async function dbSelect<T = any>(table: string, match: Record<string, any> = {}, cols = '*'): Promise<T[]> {
   let q = sb().from(table).select(cols);
@@ -69,61 +178,20 @@ async function dbDelete(table: string, match: Record<string, any>): Promise<void
   if (error) throw new Error(error.message);
 }
 
-// ── Bootstrap tables via Supabase SQL endpoint ────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// Migration (runs once on cold start — idempotent)
+// ═══════════════════════════════════════════════════════════════════════════════
 
 async function migrate(): Promise<void> {
-  const sql = `
-    CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
-      email TEXT NOT NULL UNIQUE CHECK(char_length(email) <= 254),
-      password TEXT NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS login_attempts (
-      id SERIAL PRIMARY KEY,
-      email TEXT NOT NULL,
-      succeeded BOOLEAN NOT NULL DEFAULT FALSE,
-      attempted_at TIMESTAMPTZ DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS documents (
-      id SERIAL PRIMARY KEY,
-      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      title TEXT NOT NULL DEFAULT 'Untitled document',
-      content TEXT NOT NULL DEFAULT '{}',
-      storage_path TEXT DEFAULT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS access_grants (
-      id SERIAL PRIMARY KEY,
-      document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-      collaborator_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      permission TEXT NOT NULL DEFAULT 'edit',
-      granted_at TIMESTAMPTZ DEFAULT NOW(),
-      UNIQUE(document_id, collaborator_id)
-    );
-    CREATE TABLE IF NOT EXISTS revoked_tokens (
-      jti TEXT PRIMARY KEY,
-      expires_at TIMESTAMPTZ NOT NULL
-    );
-    ALTER TABLE documents ADD COLUMN IF NOT EXISTS storage_path TEXT DEFAULT NULL;
-  `;
-  const res = await fetch(`${process.env.SUPABASE_URL}/rest/v1/rpc/exec_sql`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY!}`,
-    },
-    body: JSON.stringify({ query: sql }),
-  });
-  // exec_sql may not exist — tables already created via local migration, so ignore errors here
-  if (!res.ok) console.warn('[migrate] skipped (tables already exist)');
+  // Tables are already created by local seed — this is a no-op safety net
+  // Supabase doesn't expose raw SQL via REST, so we just probe the tables
+  const { error } = await sb().from('users').select('id').limit(1);
+  if (error) console.warn('[migrate] users table probe:', error.message);
 }
 
-// ── Storage ───────────────────────────────────────────────────────────────────
-
-const BUCKET = process.env.STORAGE_BUCKET ?? 'docs';
+// ═══════════════════════════════════════════════════════════════════════════════
+// Storage
+// ═══════════════════════════════════════════════════════════════════════════════
 
 async function uploadFile(docId: number, filename: string, buffer: Buffer, mimetype: string): Promise<string> {
   const safe = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -133,33 +201,29 @@ async function uploadFile(docId: number, filename: string, buffer: Buffer, mimet
   return storagePath;
 }
 
-// ── Auth helpers ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// Auth helpers
+// ═══════════════════════════════════════════════════════════════════════════════
 
 async function verifyToken(token: string): Promise<{ userId: number }> {
   let payload: { userId: number; jti: string };
-  try {
-    payload = jwt.verify(token, jwtSecret(), { algorithms: ['HS256'] }) as typeof payload;
-  } catch {
-    throw Object.assign(new Error('Invalid or expired token.'), { statusCode: 401 });
-  }
+  try { payload = jwt.verify(token, jwtSecret(), { algorithms: ['HS256'] }) as typeof payload; }
+  catch { throw Object.assign(new Error('Invalid or expired token.'), { statusCode: 401 }); }
   const revoked = await dbSelect('revoked_tokens', { jti: payload.jti });
   if (revoked.length) throw Object.assign(new Error('Token has been revoked.'), { statusCode: 401 });
   return { userId: payload.userId };
 }
 
 async function isLocked(email: string): Promise<boolean> {
-  const { data } = await sb()
-    .from('login_attempts')
-    .select('succeeded')
-    .eq('email', email)
-    .order('attempted_at', { ascending: false })
-    .order('id', { ascending: false });
+  const { data } = await sb().from('login_attempts').select('succeeded').eq('email', email).order('attempted_at', { ascending: false }).order('id', { ascending: false });
   let n = 0;
   for (const r of (data ?? [])) { if (!r.succeeded) n++; else break; }
   return n >= 5;
 }
 
-// ── Express app ───────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// Express app
+// ═══════════════════════════════════════════════════════════════════════════════
 
 const app = express();
 app.use(cors({ origin: '*' }));
@@ -182,20 +246,24 @@ function wrap(fn: (req: Req, res: express.Response) => Promise<void>) {
 }
 
 function mapDoc(r: any) {
-  return {
-    id: r.id, ownerId: r.owner_id, title: r.title,
-    content: r.content, storagePath: r.storage_path ?? null,
-    createdAt: r.created_at, updatedAt: r.updated_at,
-  };
+  return { id: r.id, ownerId: r.owner_id, title: r.title, content: r.content, storagePath: r.storage_path ?? null, createdAt: r.created_at, updatedAt: r.updated_at };
 }
 
-// ── Auth routes ───────────────────────────────────────────────────────────────
+async function assertAccess(docId: number, uid: number, res: express.Response): Promise<boolean> {
+  const docs = await dbSelect<{ owner_id: number }>('documents', { id: docId }, 'owner_id');
+  if (!docs[0]) { res.status(404).json({ message: 'Document not found' }); return false; }
+  if (docs[0].owner_id === uid) return true;
+  const grants = await dbSelect('access_grants', { document_id: docId, collaborator_id: uid });
+  if (!grants.length) { res.status(403).json({ message: 'Access denied' }); return false; }
+  return true;
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
 
 app.post('/api/auth/login', wrap(async (req, res) => {
   const { email, password } = req.body as { email?: string; password?: string };
   if (!email || !password) { res.status(422).json({ message: 'email and password are required.' }); return; }
   if (await isLocked(email)) { res.status(401).json({ message: 'Account locked. Try again later.' }); return; }
-
   const users = await dbSelect<{ id: number; password: string }>('users', { email }, 'id,password');
   if (!users[0] || !(await bcrypt.compare(password, users[0].password))) {
     await dbInsert('login_attempts', { email, succeeded: false });
@@ -217,13 +285,11 @@ app.post('/api/auth/logout', requireAuth, wrap(async (req, res) => {
   res.status(204).send();
 }));
 
-// ── Document routes ───────────────────────────────────────────────────────────
+// ── Documents ─────────────────────────────────────────────────────────────────
 
 app.get('/api/documents', requireAuth, wrap(async (req, res) => {
   const uid = req.userId!;
-  // Owned
   const { data: owned } = await sb().from('documents').select('id,title,updated_at').eq('owner_id', uid);
-  // Shared
   const { data: grants } = await sb().from('access_grants').select('document_id').eq('collaborator_id', uid);
   const sharedIds = (grants ?? []).map((g: any) => g.document_id);
   let shared: any[] = [];
@@ -231,10 +297,10 @@ app.get('/api/documents', requireAuth, wrap(async (req, res) => {
     const { data } = await sb().from('documents').select('id,title,updated_at').in('id', sharedIds);
     shared = data ?? [];
   }
-  const ownedIds = new Set((owned ?? []).map((d: any) => d.id));
+  const ownedSet = new Set((owned ?? []).map((d: any) => d.id));
   const all = [
     ...(owned ?? []).map((d: any) => ({ id: d.id, title: d.title, updatedAt: d.updated_at, isOwner: true })),
-    ...shared.filter(d => !ownedIds.has(d.id)).map((d: any) => ({ id: d.id, title: d.title, updatedAt: d.updated_at, isOwner: false })),
+    ...shared.filter(d => !ownedSet.has(d.id)).map((d: any) => ({ id: d.id, title: d.title, updatedAt: d.updated_at, isOwner: false })),
   ].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   res.json(all);
 }));
@@ -248,18 +314,14 @@ app.get('/api/documents/:id', requireAuth, wrap(async (req, res) => {
   const uid = req.userId!; const docId = Number(req.params.id);
   const docs = await dbSelect('documents', { id: docId });
   if (!docs[0]) { res.status(404).json({ message: 'Document not found' }); return; }
-  const isOwner = docs[0].owner_id === uid;
-  if (!isOwner) {
-    const grants = await dbSelect('access_grants', { document_id: docId, collaborator_id: uid });
-    if (!grants.length) { res.status(403).json({ message: 'Access denied' }); return; }
-  }
+  const ok = docs[0].owner_id === uid || (await dbSelect('access_grants', { document_id: docId, collaborator_id: uid })).length > 0;
+  if (!ok) { res.status(403).json({ message: 'Access denied' }); return; }
   res.json(mapDoc(docs[0]));
 }));
 
 app.put('/api/documents/:id', requireAuth, wrap(async (req, res) => {
   const uid = req.userId!; const docId = Number(req.params.id);
-  await assertAccess(docId, uid, res);
-  if (res.headersSent) return;
+  if (!(await assertAccess(docId, uid, res))) return;
   await dbUpdate('documents', { id: docId }, { content: req.body.content, updated_at: new Date().toISOString() });
   res.json({ ok: true });
 }));
@@ -268,8 +330,7 @@ app.patch('/api/documents/:id/title', requireAuth, wrap(async (req, res) => {
   const uid = req.userId!; const docId = Number(req.params.id);
   const { title } = req.body as { title?: string };
   if (!title?.trim() || title.length > 255) { res.status(422).json({ message: 'Invalid title' }); return; }
-  await assertAccess(docId, uid, res);
-  if (res.headersSent) return;
+  if (!(await assertAccess(docId, uid, res))) return;
   await dbUpdate('documents', { id: docId }, { title, updated_at: new Date().toISOString() });
   res.json({ ok: true });
 }));
@@ -283,25 +344,15 @@ app.delete('/api/documents/:id', requireAuth, wrap(async (req, res) => {
   res.status(204).send();
 }));
 
-async function assertAccess(docId: number, uid: number, res: express.Response): Promise<boolean> {
-  const docs = await dbSelect<{ owner_id: number }>('documents', { id: docId }, 'owner_id');
-  if (!docs[0]) { res.status(404).json({ message: 'Not found' }); return false; }
-  if (docs[0].owner_id === uid) return true;
-  const grants = await dbSelect('access_grants', { document_id: docId, collaborator_id: uid });
-  if (!grants.length) { res.status(403).json({ message: 'Access denied' }); return false; }
-  return true;
-}
-
-// ── Sharing routes ────────────────────────────────────────────────────────────
+// ── Sharing ───────────────────────────────────────────────────────────────────
 
 app.get('/api/documents/:id/collaborators', requireAuth, wrap(async (req, res) => {
   const uid = req.userId!; const docId = Number(req.params.id);
   const docs = await dbSelect<{ owner_id: number }>('documents', { id: docId }, 'owner_id');
   if (docs[0]?.owner_id !== uid) { res.status(403).json({ message: 'Only owner can view collaborators' }); return; }
   const grants = await dbSelect<{ collaborator_id: number }>('access_grants', { document_id: docId }, 'collaborator_id');
-  const ids = grants.map(g => g.collaborator_id);
-  if (!ids.length) { res.json([]); return; }
-  const { data } = await sb().from('users').select('id,email').in('id', ids);
+  if (!grants.length) { res.json([]); return; }
+  const { data } = await sb().from('users').select('id,email').in('id', grants.map(g => g.collaborator_id));
   res.json(data ?? []);
 }));
 
@@ -327,7 +378,7 @@ app.delete('/api/documents/:id/share/:email', requireAuth, wrap(async (req, res)
   res.json({ ok: true });
 }));
 
-// ── Import route ──────────────────────────────────────────────────────────────
+// ── Import ────────────────────────────────────────────────────────────────────
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -335,26 +386,26 @@ app.post('/api/import', requireAuth, upload.single('file'), wrap(async (req, res
   if (!req.file) { res.status(422).json({ message: 'No file uploaded.' }); return; }
   const { buffer, originalname, mimetype, size } = req.file;
   const ext = path.extname(originalname).toLowerCase();
-  if (!['.txt', '.md', '.docx'].includes(ext)) { res.status(422).json({ message: `Unsupported: ${ext}` }); return; }
+  if (!['.txt', '.md', '.docx'].includes(ext)) { res.status(422).json({ message: `Unsupported file type: ${ext}` }); return; }
   if (size === 0) { res.status(422).json({ message: 'File is empty.' }); return; }
 
-  const title = path.basename(originalname, ext) || 'Untitled';
-  let content = '{}';
+  const title = path.basename(originalname, ext).replace(/_/g, ' ').trim() || 'Untitled';
+  let content: string;
+
   if (ext === '.txt') {
     const text = buffer.toString('utf-8');
     content = JSON.stringify({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] });
   } else if (ext === '.md') {
-    const text = buffer.toString('utf-8');
-    const paras = text.split(/\n\n+/).filter(Boolean).map(p => ({
-      type: 'paragraph', content: [{ type: 'text', text: p.replace(/^#{1,6}\s*/, '') }]
-    }));
-    content = JSON.stringify({ type: 'doc', content: paras.length ? paras : [{ type: 'paragraph' }] });
+    content = JSON.stringify(parseMdToTiptap(buffer.toString('utf-8')));
   } else {
-    content = JSON.stringify({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: `[Imported: ${originalname}]` }] }] });
+    // .docx — mammoth → HTML → TipTap
+    const { value: html } = await mammoth.convertToHtml({ buffer });
+    content = JSON.stringify(htmlToTiptap(html));
   }
 
   const doc = await dbInsert('documents', { owner_id: req.userId, title, content });
 
+  // Upload original to Supabase Storage (non-fatal)
   try {
     const sp = await uploadFile(doc.id, originalname, buffer, mimetype);
     await dbUpdate('documents', { id: doc.id }, { storage_path: sp });
@@ -373,7 +424,9 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   res.status(err?.statusCode ?? 500).json({ message: err?.message ?? 'Unexpected error' });
 });
 
-// ── Serverless export ─────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// Serverless export
+// ═══════════════════════════════════════════════════════════════════════════════
 
 let migrated = false;
 const serverlessHandler = serverless(app);
