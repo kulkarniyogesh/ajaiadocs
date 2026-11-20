@@ -38,7 +38,7 @@ function ListRowSkeleton({ delay }: { delay: number }) {
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: '5fr 2fr 2fr 2fr 1fr',
+      gridTemplateColumns: '5fr 2fr 2fr 1fr',
       gap: 12,
       padding: '14px 16px',
       alignItems: 'center',
@@ -63,13 +63,7 @@ function ListRowSkeleton({ delay }: { delay: number }) {
         <Sk w="50%" h={12} />
         <Sk w="70%" h={10} r={4} />
       </div>
-      {/* Col 4 — avatars */}
-      <div style={{ display: 'flex', alignItems: 'center' }}>
-        {[0, 1, 2].map(i => (
-          <Sk key={i} w={24} h={24} r={12} style={{ marginLeft: i === 0 ? 0 : -6 }} />
-        ))}
-      </div>
-      {/* Col 5 — actions */}
+      {/* Col 4 — actions */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
         <Sk w={28} h={28} r={6} />
         <Sk w={28} h={28} r={6} />

@@ -1,0 +1,19 @@
+Walkthrough Video
+=================
+
+[Add your walkthrough video URL here after recording]
+
+Suggested walkthrough flow (3-5 minutes):
+
+1. Open https://ajaiadocs-p5ut.netlify.app
+2. Log in as alice@example.com / password123
+3. Show the Document Central home page — template rail, filters, list/grid toggle
+4. Create a new document from the PRD template — show it opens pre-populated
+5. Edit the document — type, format with Bold/Heading, show autosave indicator
+6. Click Share, add bob@example.com as a collaborator
+7. Import a .docx or .md file via the Import modal — show parsed content in editor
+8. Export the document as Markdown — show the downloaded .md file
+9. Click the more-vert menu — show context menu portal (doesn't clip)
+10. Log out, log in as bob@example.com
+11. Click "Shared with Me" tab — show Alice's shared document
+12. Click "Recent" tab — show all documents sorted by last edited

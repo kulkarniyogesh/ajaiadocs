@@ -616,7 +616,7 @@ export default function DocumentListPage({
               <div style={{ background: 'var(--color-surface-container-lowest)', borderRadius: 12, boxShadow: 'var(--shadow-sm)', overflow: 'visible' }}>
                 {/* List header with inline view toggle */}
                 <div style={{
-                  display: 'grid', gridTemplateColumns: '5fr 2fr 2fr 2fr 1fr',
+                  display: 'grid', gridTemplateColumns: '5fr 2fr 2fr 1fr',
                   gap: 'var(--space-sm)', padding: 'var(--space-sm) var(--space-md)',
                   background: 'var(--color-surface-container-low)',
                   borderBottom: '1px solid var(--color-outline-variant)',
@@ -631,26 +631,7 @@ export default function DocumentListPage({
                   </div>
                   <div>Owner</div>
                   <div>Last sync</div>
-                  <div>Collaborators</div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
-                    {/* Inline mini view toggle */}
-                    <div style={{ display: 'flex', padding: 2, borderRadius: 6, background: 'var(--color-surface-container)', gap: 1 }}>
-                      {([
-                        { mode: 'list' as ViewMode, icon: 'format_list_bulleted' },
-                        { mode: 'grid' as ViewMode, icon: 'grid_view' },
-                      ]).map(({ mode, icon }) => (
-                        <button key={mode} onClick={() => setViewMode(mode)} title={`${mode} view`} style={{
-                          width: 22, height: 22, border: 'none', borderRadius: 4,
-                          background: viewMode === mode ? 'var(--color-primary)' : 'transparent',
-                          color: viewMode === mode ? 'var(--color-on-primary)' : 'var(--color-on-surface-variant)',
-                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontFamily: 'inherit', transition: 'all 100ms',
-                        }}>
-                          <span className="material-symbols-outlined" style={{ fontSize: 14 }}>{icon}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <div style={{ textAlign: 'right' }}>Actions</div>
                 </div>
 
                 {loading ? (
@@ -697,33 +678,11 @@ export default function DocumentListPage({
                 </div>
               ) : (
                 <>
-                  {/* Grid header with view toggle */}
-                  <div style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    marginBottom: 'var(--space-sm)',
-                    padding: '6px 2px',
-                  }}>
+                  {/* Grid count bar */}
+                  <div style={{ marginBottom: 'var(--space-sm)', padding: '6px 2px' }}>
                     <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-on-surface-variant)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                       {filteredDocs.length} document{filteredDocs.length !== 1 ? 's' : ''}
                     </span>
-                    <div style={{ display: 'flex', padding: 2, borderRadius: 8, background: 'var(--color-surface-container)', border: '1px solid var(--color-outline-variant)', gap: 2 }}>
-                      {([
-                        { mode: 'list' as ViewMode, icon: 'format_list_bulleted', label: 'List' },
-                        { mode: 'grid' as ViewMode, icon: 'grid_view', label: 'Grid' },
-                      ]).map(({ mode, icon, label }) => (
-                        <button key={mode} onClick={() => setViewMode(mode)} title={`${label} view`} style={{
-                          height: 28, padding: '0 10px', border: 'none', borderRadius: 6,
-                          background: viewMode === mode ? 'var(--color-primary)' : 'transparent',
-                          color: viewMode === mode ? 'var(--color-on-primary)' : 'var(--color-on-surface-variant)',
-                          cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
-                          fontSize: 'var(--text-xs)', fontWeight: viewMode === mode ? 600 : 500,
-                          fontFamily: 'inherit', transition: 'all 100ms',
-                        }}>
-                          <span className="material-symbols-outlined" style={{ fontSize: 15 }}>{icon}</span>
-                          {label}
-                        </button>
-                      ))}
-                    </div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 'var(--space-md)' }}>
                     {filteredDocs.map(doc => (

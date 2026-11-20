@@ -34,12 +34,6 @@ function pickIcon(title: string) {
   return DOC_ICONS[h % DOC_ICONS.length];
 }
 
-const FAKE_COLLABORATORS = [
-  { initials: 'MT', color: '#4f46e5' },
-  { initials: 'ML', color: '#006c49' },
-  { initials: 'AR', color: '#684000' },
-];
-
 // ── Export helper ─────────────────────────────────────────────────────────────
 
 function tiptapToMarkdown(node: any, depth = 0): string {
@@ -317,7 +311,7 @@ export function DocumentListItem({
         onMouseLeave={() => setHovered(false)}
         style={{
           display: 'grid',
-          gridTemplateColumns: '5fr 2fr 2fr 2fr 1fr',
+          gridTemplateColumns: '5fr 2fr 2fr 1fr',
           gap: 'var(--space-sm)',
           padding: 'var(--space-md) var(--space-md)',
           alignItems: 'center',
@@ -380,27 +374,7 @@ export function DocumentListItem({
           </div>
         </div>
 
-        {/* Col 4 — Collaborator avatars */}
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          {FAKE_COLLABORATORS.slice(0, 3).map((c, i) => (
-            <div key={i} style={{
-              width: 24, height: 24, borderRadius: '50%', background: c.color,
-              border: '2px solid var(--color-surface-container-lowest)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 9, fontWeight: 700, color: '#fff',
-              marginLeft: i === 0 ? 0 : -6, position: 'relative', zIndex: 3 - i,
-            }} title={c.initials}>{c.initials}</div>
-          ))}
-          <div style={{
-            width: 24, height: 24, borderRadius: '50%', background: 'var(--color-surface-container)',
-            border: '2px solid var(--color-surface-container-lowest)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 9, fontWeight: 700, color: 'var(--color-on-surface-variant)',
-            marginLeft: -6,
-          }}>+1</div>
-        </div>
-
-        {/* Col 5 — Actions */}
+        {/* Col 4 — Actions */}
         <div
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}
           onClick={e => e.stopPropagation()}
