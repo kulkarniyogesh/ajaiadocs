@@ -2,10 +2,10 @@
   command = "npm run build:netlify"
   publish = "client/dist"
   functions = "netlify/functions"
-  SECRETS_SCAN_OMIT_KEYS = "NODE_ENV,STORAGE_BUCKET"
 
 [build.environment]
   NODE_VERSION = "20"
+  SECRETS_SCAN_OMIT_KEYS = "NODE_ENV,STORAGE_BUCKET"
 
 # Rewrite all /api/* requests to the serverless function
 [[redirects]]
