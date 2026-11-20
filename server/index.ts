@@ -8,6 +8,7 @@ import documentsRouter from './routes/documents.js';
 import sharingRouter from './routes/sharing.js';
 import importRouter from './routes/import.js';
 import { errorMiddleware } from './lib/errors.js';
+import { migrate } from './db.js';
 
 dotenv.config();
 
@@ -37,9 +38,17 @@ app.use(errorMiddleware);
 
 const port = process.env.PORT ?? 3000;
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(Number(port), () => {
-    console.log(`Server running on port ${port}`);
-  });
+  migrate()
+    .then(() => {
+      console.log('[db] schema ready');
+      app.listen(Number(port), () => {
+        console.log(`Server running on port ${port}`);
+      });
+    })
+    .catch((err) => {
+      console.error('[db] migration failed', err);
+      process.exit(1);
+    });
 }
 
 export { app };

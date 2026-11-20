@@ -17,15 +17,16 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
     return;
   }
   const token = authHeader.slice(7);
-  try {
-    const { userId } = verifyToken(token);
-    req.userId = userId;
-    next();
-  } catch (err) {
-    if (err instanceof AuthError) {
-      res.status(401).json({ message: err.message });
-    } else {
-      next(err);
-    }
-  }
+  verifyToken(token)
+    .then(({ userId }) => {
+      req.userId = userId;
+      next();
+    })
+    .catch((err) => {
+      if (err instanceof AuthError) {
+        res.status(401).json({ message: err.message });
+      } else {
+        next(err);
+      }
+    });
 }

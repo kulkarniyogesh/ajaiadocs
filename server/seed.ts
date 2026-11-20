@@ -1,5 +1,6 @@
+import 'dotenv/config';
 import bcrypt from 'bcryptjs';
-import db from './db.js';
+import { query, migrate } from './db.js';
 
 const SEED_USERS = [
   { email: 'alice@example.com', password: 'password123' },
@@ -7,16 +8,21 @@ const SEED_USERS = [
 ];
 
 async function seed() {
+  await migrate();
   for (const user of SEED_USERS) {
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(user.email);
-    if (existing) {
+    const { rows } = await query<{ id: number }>(
+      'SELECT id FROM users WHERE email = $1',
+      [user.email]
+    );
+    if (rows[0]) {
       console.log(`User already exists: ${user.email}`);
       continue;
     }
     const hash = await bcrypt.hash(user.password, 10);
-    db.prepare('INSERT INTO users (email, password) VALUES (?, ?)').run(user.email, hash);
+    await query('INSERT INTO users (email, password) VALUES ($1, $2)', [user.email, hash]);
     console.log(`Seeded user: ${user.email}`);
   }
+  process.exit(0);
 }
 
-seed().catch(console.error);
+seed().catch((err) => { console.error(err); process.exit(1); });

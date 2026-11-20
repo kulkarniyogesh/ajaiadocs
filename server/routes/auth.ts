@@ -12,14 +12,14 @@ router.post('/login', asyncHandler(async (req, res) => {
     res.status(422).json({ message: 'email and password are required.' });
     return;
   }
-  if (isLocked(email)) {
+  if (await isLocked(email)) {
     throw new AuthError('Account is locked. Try again later.');
   }
   try {
     const { token } = await login(email, password);
     res.json({ token });
   } catch (err) {
-    recordFailedAttempt(email);
+    await recordFailedAttempt(email);
     throw err;
   }
 }));
@@ -27,7 +27,7 @@ router.post('/login', asyncHandler(async (req, res) => {
 // POST /api/auth/logout
 router.post('/logout', requireAuth, asyncHandler(async (req, res) => {
   const token = req.headers.authorization!.slice(7);
-  logout(token);
+  await logout(token);
   res.status(204).send();
 }));
 

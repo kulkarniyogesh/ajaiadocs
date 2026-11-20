@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "./netlify/functions-build",
+    "rootDir": ".",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true
+  },
+  "include": [
+    "netlify/functions/**/*",
+    "server/routes/**/*",
+    "server/services/**/*",
+    "server/middleware/**/*",
+    "server/lib/**/*",
+    "server/db.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "client"
+  ]
+}

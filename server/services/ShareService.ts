@@ -1,4 +1,4 @@
-import db from '../db.js';
+import { query } from '../db.js';
 import { ForbiddenError, ValidationError } from '../lib/errors.js';
 
 export interface UserSummary {
@@ -10,127 +10,105 @@ export interface UserSummary {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Returns the owner_id of a document, or null if the document doesn't exist. */
-function fetchOwnerId(docId: number): number | null {
-  const row = db
-    .prepare<[number], { owner_id: number }>('SELECT owner_id FROM documents WHERE id = ?')
-    .get(docId);
-  return row?.owner_id ?? null;
+async function fetchOwnerId(docId: number): Promise<number | null> {
+  const { rows } = await query<{ owner_id: number }>(
+    'SELECT owner_id FROM documents WHERE id = $1',
+    [docId]
+  );
+  return rows[0]?.owner_id ?? null;
 }
 
-/** Asserts that ownerUserId owns docId; throws ForbiddenError otherwise. */
-function assertOwner(docId: number, ownerUserId: number): void {
-  const ownerId = fetchOwnerId(docId);
+async function assertOwner(docId: number, ownerUserId: number): Promise<void> {
+  const ownerId = await fetchOwnerId(docId);
   if (ownerId !== ownerUserId) {
     throw new ForbiddenError('You do not have permission to manage sharing for this document.');
   }
 }
 
-/** Looks up a user by email; throws ValidationError if not found. */
-function fetchUserByEmail(email: string): { id: number; email: string } {
-  const row = db
-    .prepare<[string], { id: number; email: string }>('SELECT id, email FROM users WHERE email = ?')
-    .get(email);
-  if (!row) {
-    throw new ValidationError(`No user found with email: ${email}`);
-  }
-  return row;
+async function fetchUserByEmail(email: string): Promise<{ id: number; email: string }> {
+  const { rows } = await query<{ id: number; email: string }>(
+    'SELECT id, email FROM users WHERE email = $1',
+    [email]
+  );
+  if (!rows[0]) throw new ValidationError(`No user found with email: ${email}`);
+  return rows[0];
 }
 
-/** Returns the email of a user by id; throws if not found. */
-function fetchOwnerEmail(userId: number): string {
-  const row = db
-    .prepare<[number], { email: string }>('SELECT email FROM users WHERE id = ?')
-    .get(userId);
-  if (!row) {
-    throw new ValidationError('Owner user not found.');
-  }
-  return row.email;
+async function fetchOwnerEmail(userId: number): Promise<string> {
+  const { rows } = await query<{ email: string }>(
+    'SELECT email FROM users WHERE id = $1',
+    [userId]
+  );
+  if (!rows[0]) throw new ValidationError('Owner user not found.');
+  return rows[0].email;
 }
 
 // ---------------------------------------------------------------------------
-// grantAccess (requirement 8.1, 8.2, 8.3)
+// grantAccess
 // ---------------------------------------------------------------------------
 
-/**
- * Grants a collaborator access to a document.
- *
- * Throws ForbiddenError  – ownerUserId does not own docId.
- * Throws ValidationError – collaboratorEmail not found, is the owner, or the
- *                          document already has 50 collaborators.
- */
 export async function grantAccess(
   docId: number,
   ownerUserId: number,
-  collaboratorEmail: string,
+  collaboratorEmail: string
 ): Promise<void> {
-  assertOwner(docId, ownerUserId);
+  await assertOwner(docId, ownerUserId);
 
-  const ownerEmail = fetchOwnerEmail(ownerUserId);
+  const ownerEmail = await fetchOwnerEmail(ownerUserId);
   if (collaboratorEmail === ownerEmail) {
     throw new ValidationError('You cannot share a document with yourself.');
   }
 
-  const collaborator = fetchUserByEmail(collaboratorEmail);
+  const collaborator = await fetchUserByEmail(collaboratorEmail);
 
-  const countRow = db
-    .prepare<[number], { 'COUNT(*)': number }>('SELECT COUNT(*) FROM access_grants WHERE document_id = ?')
-    .get(docId);
-  const grantCount = countRow?.['COUNT(*)'] ?? 0;
-  if (grantCount >= 50) {
+  const { rows } = await query<{ count: string }>(
+    'SELECT COUNT(*) FROM access_grants WHERE document_id = $1',
+    [docId]
+  );
+  if (parseInt(rows[0].count, 10) >= 50) {
     throw new ValidationError('A document cannot have more than 50 collaborators.');
   }
 
-  db.prepare<[number, number]>(
-    'INSERT OR IGNORE INTO access_grants (document_id, collaborator_id) VALUES (?, ?)',
-  ).run(docId, collaborator.id);
+  await query(
+    'INSERT INTO access_grants (document_id, collaborator_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+    [docId, collaborator.id]
+  );
 }
 
 // ---------------------------------------------------------------------------
-// revokeAccess (requirement 8.5, 8.6)
+// revokeAccess
 // ---------------------------------------------------------------------------
 
-/**
- * Revokes a collaborator's access to a document.
- *
- * Throws ForbiddenError  – ownerUserId does not own docId.
- * Throws ValidationError – collaboratorEmail not found.
- */
 export async function revokeAccess(
   docId: number,
   ownerUserId: number,
-  collaboratorEmail: string,
+  collaboratorEmail: string
 ): Promise<void> {
-  assertOwner(docId, ownerUserId);
+  await assertOwner(docId, ownerUserId);
+  const collaborator = await fetchUserByEmail(collaboratorEmail);
 
-  const collaborator = fetchUserByEmail(collaboratorEmail);
-
-  db.prepare<[number, number]>(
-    'DELETE FROM access_grants WHERE document_id = ? AND collaborator_id = ?',
-  ).run(docId, collaborator.id);
+  await query(
+    'DELETE FROM access_grants WHERE document_id = $1 AND collaborator_id = $2',
+    [docId, collaborator.id]
+  );
 }
 
 // ---------------------------------------------------------------------------
-// listCollaborators (requirement 8.7)
+// listCollaborators
 // ---------------------------------------------------------------------------
 
-/**
- * Returns the list of users who have been granted access to a document.
- *
- * Throws ForbiddenError – ownerUserId does not own docId.
- */
 export async function listCollaborators(
   docId: number,
-  ownerUserId: number,
+  ownerUserId: number
 ): Promise<UserSummary[]> {
-  assertOwner(docId, ownerUserId);
+  await assertOwner(docId, ownerUserId);
 
-  return db
-    .prepare<[number], UserSummary>(
-      `SELECT u.id, u.email
-       FROM users u
-       JOIN access_grants ag ON ag.collaborator_id = u.id
-       WHERE ag.document_id = ?`,
-    )
-    .all(docId);
+  const { rows } = await query<UserSummary>(
+    `SELECT u.id, u.email
+     FROM users u
+     JOIN access_grants ag ON ag.collaborator_id = u.id
+     WHERE ag.document_id = $1`,
+    [docId]
+  );
+  return rows;
 }

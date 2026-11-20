@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import db from '../db.js';
+import { query } from '../db.js';
 import { AuthError } from '../lib/errors.js';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret';
@@ -11,6 +11,7 @@ const JWT_EXPIRES_IN = '24h';
 interface JwtPayload {
   userId: number;
   jti: string;
+  exp?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -21,31 +22,31 @@ export async function login(
   email: string,
   password: string
 ): Promise<{ token: string }> {
-  if (isLocked(email)) {
+  if (await isLocked(email)) {
     throw new AuthError('Account is locked. Try again later.');
   }
 
-  const user = db
-    .prepare<[string], { id: number; email: string; password: string }>(
-      'SELECT id, email, password FROM users WHERE email = ?'
-    )
-    .get(email);
+  const { rows } = await query<{ id: number; email: string; password: string }>(
+    'SELECT id, email, password FROM users WHERE email = $1',
+    [email]
+  );
+  const user = rows[0];
 
   if (!user) {
-    recordFailedAttempt(email);
+    await recordFailedAttempt(email);
     throw new AuthError('Invalid email or password.');
   }
 
   const passwordMatch = await bcrypt.compare(password, user.password);
   if (!passwordMatch) {
-    recordFailedAttempt(email);
+    await recordFailedAttempt(email);
     throw new AuthError('Invalid email or password.');
   }
 
-  // Record a succeeded attempt to reset the consecutive-failure counter.
-  db.prepare(
-    'INSERT INTO login_attempts (email, succeeded) VALUES (?, 1)'
-  ).run(email);
+  await query(
+    'INSERT INTO login_attempts (email, succeeded) VALUES ($1, TRUE)',
+    [email]
+  );
 
   const jti = crypto.randomUUID();
   const token = jwt.sign({ userId: user.id, jti }, JWT_SECRET, {
@@ -60,33 +61,29 @@ export async function login(
 // logout
 // ---------------------------------------------------------------------------
 
-export function logout(token: string): void {
+export async function logout(token: string): Promise<void> {
   let payload: JwtPayload;
   try {
     payload = jwt.decode(token) as JwtPayload;
   } catch {
-    return; // Nothing useful to revoke.
+    return;
   }
-
   if (!payload?.jti) return;
 
-  // Derive expires_at from the exp claim, falling back to 24 h from now.
-  const exp: number =
-    (payload as unknown as { exp?: number }).exp ??
-    Math.floor(Date.now() / 1000) + 86_400;
-
+  const exp = payload.exp ?? Math.floor(Date.now() / 1000) + 86_400;
   const expiresAt = new Date(exp * 1000).toISOString();
 
-  db.prepare(
-    'INSERT OR IGNORE INTO revoked_tokens (jti, expires_at) VALUES (?, ?)'
-  ).run(payload.jti, expiresAt);
+  await query(
+    'INSERT INTO revoked_tokens (jti, expires_at) VALUES ($1, $2) ON CONFLICT (jti) DO NOTHING',
+    [payload.jti, expiresAt]
+  );
 }
 
 // ---------------------------------------------------------------------------
 // verifyToken
 // ---------------------------------------------------------------------------
 
-export function verifyToken(token: string): { userId: number } {
+export async function verifyToken(token: string): Promise<{ userId: number }> {
   let payload: JwtPayload;
   try {
     payload = jwt.verify(token, JWT_SECRET, {
@@ -96,13 +93,12 @@ export function verifyToken(token: string): { userId: number } {
     throw new AuthError('Invalid or expired token.');
   }
 
-  const revoked = db
-    .prepare<[string], { jti: string }>(
-      'SELECT jti FROM revoked_tokens WHERE jti = ?'
-    )
-    .get(payload.jti);
+  const { rows } = await query<{ jti: string }>(
+    'SELECT jti FROM revoked_tokens WHERE jti = $1',
+    [payload.jti]
+  );
 
-  if (revoked) {
+  if (rows.length > 0) {
     throw new AuthError('Token has been revoked.');
   }
 
@@ -113,32 +109,32 @@ export function verifyToken(token: string): { userId: number } {
 // recordFailedAttempt
 // ---------------------------------------------------------------------------
 
-export function recordFailedAttempt(email: string): void {
-  db.prepare(
-    'INSERT INTO login_attempts (email, succeeded) VALUES (?, 0)'
-  ).run(email);
+export async function recordFailedAttempt(email: string): Promise<void> {
+  await query(
+    'INSERT INTO login_attempts (email, succeeded) VALUES ($1, FALSE)',
+    [email]
+  );
 }
 
 // ---------------------------------------------------------------------------
 // isLocked
 // ---------------------------------------------------------------------------
 
-export function isLocked(email: string): boolean {
-  const attempts = db
-    .prepare<[string], { succeeded: number }>(
-      `SELECT succeeded
-       FROM   login_attempts
-       WHERE  email = ?
-       ORDER  BY attempted_at DESC, id DESC`
-    )
-    .all(email);
+export async function isLocked(email: string): Promise<boolean> {
+  const { rows } = await query<{ succeeded: boolean }>(
+    `SELECT succeeded
+     FROM   login_attempts
+     WHERE  email = $1
+     ORDER  BY attempted_at DESC, id DESC`,
+    [email]
+  );
 
   let consecutiveFailures = 0;
-  for (const attempt of attempts) {
-    if (attempt.succeeded === 0) {
+  for (const row of rows) {
+    if (!row.succeeded) {
       consecutiveFailures++;
     } else {
-      break; // A success resets the streak.
+      break;
     }
   }
 
