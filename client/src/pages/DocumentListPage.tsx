@@ -11,6 +11,7 @@ interface DocumentListPageProps {
   onSelectDocument: (id: number) => void;
   userEmail?: string;
   onLogout: () => void;
+  onTabChange: (tab: string) => void;
 }
 
 type ViewMode = 'list' | 'grid';
@@ -168,6 +169,7 @@ export default function DocumentListPage({
   onSelectDocument,
   userEmail,
   onLogout,
+  onTabChange,
 }: DocumentListPageProps) {
   const { documents, loading, error, createNew, remove, importDoc } = useDocumentList();
   const [uploading, setUploading] = useState(false);
@@ -249,7 +251,7 @@ export default function DocumentListPage({
     setTimeout(() => setStatusMessage(null), 3000);
   }
 
-  // Filtered + sorted document list
+  // Filtered + sorted document list — home page shows only 5 most recent
   const filteredDocs = useMemo(() => {
     let result = documents.filter(doc => {
       const matchStatus =
@@ -262,11 +264,14 @@ export default function DocumentListPage({
       return matchStatus && matchQuery;
     });
 
-    // "Recent" tab: sort by updatedAt descending and cap at 10
-    if (activeTab === 'recent') {
-      result = [...result].sort(
-        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      ).slice(0, 10);
+    // Sort newest first
+    result = [...result].sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+
+    // Home page: cap at 5 unless user is filtering
+    if (!filterQuery.trim() && statusFilter === 'all') {
+      result = result.slice(0, 5);
     }
 
     return result;
@@ -282,7 +287,7 @@ export default function DocumentListPage({
         onLogout={onLogout}
         showTabs
         activeTab={activeTab}
-        onTabChange={handleTabChange}
+        onTabChange={onTabChange}
         onNewDocument={handleCreateNew}
       />
     }>
@@ -678,6 +683,7 @@ export default function DocumentListPage({
                   </ul>
                 )}
               </div>
+
             ) : (
               /* GRID VIEW */
               loading ? (
@@ -736,6 +742,26 @@ export default function DocumentListPage({
               )
             )}
           </div>
+
+          {/* View all recent → shown on home page when there are more than 5 docs */}
+          {!filterQuery.trim() && statusFilter === 'all' && documents.length > 5 && (
+            <div style={{ marginTop: 'var(--space-sm)', textAlign: 'center' }}>
+              <button
+                onClick={() => onTabChange('recent')}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--color-primary)', fontSize: 'var(--text-sm)', fontWeight: 600,
+                  fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '8px 16px', borderRadius: 8, transition: 'background 100ms',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-primary-fixed)')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+              >
+                View all {documents.length} documents
+                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>arrow_forward</span>
+              </button>
+            </div>
+          )}
         </section>
 
         {/* ── Storage / sync ribbon ── */}

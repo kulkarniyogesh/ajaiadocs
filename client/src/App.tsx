@@ -1,19 +1,22 @@
 import { useState, useEffect } from 'react';
 import LoginPage from './pages/LoginPage';
 import DocumentListPage from './pages/DocumentListPage';
+import SharedWithMePage from './pages/SharedWithMePage';
+import RecentPage from './pages/RecentPage';
 import EditorPage from './pages/EditorPage';
 import { clearToken, setToken } from './api/client';
 
 type View =
   | { name: 'login' }
   | { name: 'list' }
+  | { name: 'shared-with-me' }
+  | { name: 'recent' }
   | { name: 'editor'; documentId: number };
 
 function App() {
   const [view, setView] = useState<View>({ name: 'login' });
   const [userEmail, setUserEmail] = useState<string | undefined>();
 
-  // On mount: check if a token exists in localStorage
   useEffect(() => {
     const token = localStorage.getItem('token');
     const email = localStorage.getItem('userEmail');
@@ -45,6 +48,13 @@ function App() {
     setView({ name: 'list' });
   }
 
+  /** Called when a nav tab is clicked from any page */
+  function handleTabChange(tab: string) {
+    if (tab === 'shared-with-me') setView({ name: 'shared-with-me' });
+    else if (tab === 'recent') setView({ name: 'recent' });
+    else setView({ name: 'list' }); // 'all-documents' + 'architecture'
+  }
+
   if (view.name === 'login') {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
   }
@@ -55,6 +65,29 @@ function App() {
         onSelectDocument={handleSelectDocument}
         userEmail={userEmail}
         onLogout={handleLogout}
+        onTabChange={handleTabChange}
+      />
+    );
+  }
+
+  if (view.name === 'shared-with-me') {
+    return (
+      <SharedWithMePage
+        onSelectDocument={handleSelectDocument}
+        userEmail={userEmail}
+        onLogout={handleLogout}
+        onTabChange={handleTabChange}
+      />
+    );
+  }
+
+  if (view.name === 'recent') {
+    return (
+      <RecentPage
+        onSelectDocument={handleSelectDocument}
+        userEmail={userEmail}
+        onLogout={handleLogout}
+        onTabChange={handleTabChange}
       />
     );
   }
